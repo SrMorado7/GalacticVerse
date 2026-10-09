@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Diagnóstico SharedObject · Galactic Champions</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#07111f;color:#edf6ff}
+body{max-width:900px;margin:0 auto;padding:22px}h1{font-size:1.6rem}p,li{line-height:1.55;color:#bfd2e5}
+section{background:#0c1b2c;border:1px solid #29435e;border-radius:12px;padding:16px;margin:14px 0}
+button{padding:10px 14px;border:1px solid #426487;border-radius:8px;background:#17618d;color:white;cursor:pointer}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#06101b;border-radius:8px;padding:12px;max-height:450px;overflow:auto}
+small{color:#9bb6d2}.warn{color:#ffd98a}
+</style>
+</head>
+<body>
+<h1>Diagnóstico de guardado Flash / Ruffle</h1>
+<p>Esta página solo inspecciona el almacenamiento del navegador en el mismo sitio. No cambia ni borra partidas y no envía datos a ningún servidor.</p>
+<section>
+<h2>Antes de analizar</h2>
+<ol>
+<li>Abre el juego en otra pestaña del mismo dominio de GitHub Pages.</li>
+<li>Juega hasta que ocurra algo que normalmente se guarda (por ejemplo, avanzar en el tutorial o desbloquear algo) y espera unos segundos.</li>
+<li>Vuelve aquí y pulsa <b>Actualizar diagnóstico</b>.</li>
+<li>Si puedes, toma otro diagnóstico antes de jugar y compara las claves y tamaños.</li>
+</ol>
+<p class="warn">No pegues aquí contraseñas, tokens ni claves privadas. El informe intenta mostrar nombres y tamaños, no el contenido completo de las partidas.</p>
+<button id="refresh">Actualizar diagnóstico</button>
+</section>
+<section><h2>Origen y Ruffle</h2><pre id="origin">Analizando…</pre></section>
+<section><h2>localStorage</h2><pre id="local">Analizando…</pre></section>
+<section><h2>IndexedDB</h2><pre id="idb">Analizando…</pre></section>
+<section><h2>Estimación de almacenamiento del sitio</h2><pre id="estimate">Analizando…</pre></section>
+<script>
+const $ = id => document.getElementById(id);
+const safe = v => { try { return JSON.stringify(v, null, 2); } catch { return String(v); } };
+async function inspect() {
+  $('origin').textContent = safe({
+    origin: location.origin,
+    page: location.pathname,
+    ruffleGlobalPresent: !!window.RufflePlayer,
+    ruffleElements: [...document.querySelectorAll('ruffle-player, ruffle-embed, object, embed')].map(e => ({
+      tag: e.tagName.toLowerCase(), id: e.id || null, type: e.getAttribute('type') || null
+    })),
+    browserStorageAvailable: (() => { try { return !!window.localStorage; } catch { return false; } })()
+  });
+  try {
+    const entries = [];
+    for (let i=0; i<localStorage.length; i++) {
+      const key = localStorage.key(i);
+      const value = localStorage.getItem(key) || '';
+      entries.push({key, characters: value.length, preview: value.slice(0, 80).replace(/[\r\n\t]/g, ' ')});
+    }
+    $('local').textContent = safe({count: entries.length, entries});
+  } catch (e) { $('local').textContent = 'No se pudo leer localStorage: ' + e.message; }
+
+  try {
+    if (!indexedDB.databases) {
+      $('idb').textContent = 'Este navegador no ofrece indexedDB.databases(). No se abrió ni modificó ninguna base.';
+    } else {
+      const dbs = await indexedDB.databases();
+      const results = [];
+      for (const item of dbs) {
+        if (!item.name) continue;
+        const db = await new Promise((resolve, reject) => {
+          const req = indexedDB.open(item.name);
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
+        results.push({name: db.name, version: db.version, objectStores: [...db.objectStoreNames]});
+        db.close();
+      }
+      $('idb').textContent = safe({count: results.length, databases: results});
+    }
+  } catch (e) { $('idb').textContent = 'No se pudo enumerar IndexedDB: ' + e.message; }
+
+  try {
+    const e = await navigator.storage?.estimate?.();
+    $('estimate').textContent = safe(e ? {usageBytes:e.usage, quotaBytes:e.quota} : 'La API de estimación no está disponible.');
+  } catch (err) { $('estimate').textContent = 'No disponible: ' + err.message; }
+}
+$('refresh').addEventListener('click', inspect);
+inspect();
+</script>
+</body>
+</html>
