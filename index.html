@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07111f">
+  <meta name="description" content="Ben 10: Galactic Champions — versión web ejecutada con Ruffle.">
+  <title>Ben 10: Galactic Champions</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, -apple-system, Segoe UI, sans-serif; background: #07111f; color: #edf6ff; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 20px; background: radial-gradient(ellipse at top, #15345a 0%, #07111f 65%); }
+    main { width: min(100%, 1100px); }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 0 14px; flex-wrap: wrap; }
+    h1 { font-size: clamp(1.1rem, 3vw, 1.7rem); margin: 0; letter-spacing: .04em; }
+    .tag { color: #9bb6d2; font-size: .9rem; margin-top: 5px; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    button { border: 1px solid #426487; border-radius: 8px; background: #122a45; color: #fff; padding: 10px 14px; font: inherit; cursor: pointer; }
+    button:hover, .account-link:hover { background: #1b3c60; }
+    .account-link { border: 1px solid #426487; border-radius: 8px; background: #122a45; color: #fff; padding: 10px 14px; font: inherit; text-decoration: none; display: inline-flex; align-items: center; }
+    #frame { width: 100%; aspect-ratio: 850 / 550; min-height: 250px; display: grid; place-items: center; overflow: hidden; background: #000; border: 1px solid #29435e; border-radius: 12px; box-shadow: 0 18px 60px #0008; }
+    #game { width: 100%; height: 100%; }
+    #status { padding: 12px 2px 0; color: #9bb6d2; font-size: .9rem; line-height: 1.5; }
+    #status.error { color: #ffb4b4; }
+    footer { color: #708ba8; font-size: .8rem; margin-top: 12px; }
+    @media (max-width: 560px) { body { padding: 10px; } #frame { min-height: 200px; border-radius: 6px; } button, .account-link { padding: 8px 10px; } }
+  </style>
+  <script src="./supabase-config.js"></script>
+  <script src="https://unpkg.com/@ruffle-rs/ruffle"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>BEN 10: GALACTIC CHAMPIONS</h1>
+        <div class="tag">Edición en español · Reproductor web Ruffle</div>
+      </div>
+      <div class="actions">
+        <a class="account-link" href="./account.html">Cuenta de jugador</a>
+        <button id="save-progress" type="button">Guardar progreso</button>
+        <button id="reload" type="button">Reiniciar juego</button>
+        <button id="fullscreen" type="button">Pantalla completa</button>
+      </div>
+    </header>
+    <section id="frame" aria-label="Juego">
+      <div id="game"></div>
+    </section>
+    <div id="status" role="status">Cargando el reproductor y el juego… La primera carga puede tardar unos segundos.</div>
+    <footer>Si el juego no carga, revisa la consola del navegador y la compatibilidad de Ruffle con este archivo Flash.</footer>
+  </main>
+  <script type="module">
+    import { loadProgress, saveProgress, getProgressSupabaseClient } from './game-progress.js';
+    (() => {
+      const mount = document.getElementById('game');
+      const status = document.getElementById('status');
+      let player, syncTimer = null, lastObservedValue = null, lastSavedValue = null;
+      let cloudAvailable = false, userIsSignedIn = false, startupCloudSave = null, conflictDetected = false;
+      function showError(message) { status.classList.add('error'); status.textContent = message; }
+      function setStatus(message) { status.classList.remove('error'); status.textContent = message; }
+      function sharedObjectKey() {
+        const swfUrl = new URL('./game.swf', location.href);
+        return `${swfUrl.host}${swfUrl.pathname}/galacticchampions`;
+      }
+      function readLocalSharedObject() {
+        try { return localStorage.getItem(sharedObjectKey()); }
+        catch (error) { console.warn('No se pudo leer el guardado local:', error); return null; }
+      }
+      async function prepareCloudSave() {
+        try {
+          const client = getProgressSupabaseClient();
+          const { data: { user }, error } = await client.auth.getUser();
+          if (error) throw error;
+          userIsSignedIn = !!user;
+          if (!user) return;
+          cloudAvailable = true;
+          startupCloudSave = await loadProgress();
+          const localValue = readLocalSharedObject();
+          const cloudValue = startupCloudSave?.ruffleSharedObject;
+          if (!localValue && typeof cloudValue === 'string' && cloudValue.length) {
+            localStorage.setItem(sharedObjectKey(), cloudValue);
+            lastObservedValue = cloudValue;
+            lastSavedValue = cloudValue;
+            setStatus('Guardado de la nube restaurado. Cargando el juego…');
+          } else if (localValue && !startupCloudSave) {
+            lastObservedValue = localValue;
+          } else if (localValue && typeof cloudValue === 'string' && localValue !== cloudValue) {
+            conflictDetected = true;
+            lastObservedValue = localValue;
+            setStatus('Hay un guardado local y otro en la nube diferentes. Se conserva el local por seguridad; no se sincronizará hasta resolver el conflicto.');
+          } else {
+            lastObservedValue = localValue;
+            lastSavedValue = cloudValue || null;
+          }
+        } catch (error) {
+          console.warn('Sincronización inicial con Supabase no disponible:', error);
+          setStatus('No se pudo consultar la nube; el juego usará el guardado local.');
+        }
+      }
+      async function uploadCurrentSave(force = false) {
+        if (!userIsSignedIn || !cloudAvailable) return;
+        const value = readLocalSharedObject();
+        if (typeof value !== 'string' || !value.length) return;
+        if (!force && value === lastSavedValue) return;
+        if (conflictDetected && !force) return;
+        try {
+          await saveProgress({ ...(startupCloudSave || {}), ruffleSharedObject: value,
+            extra: { ...(startupCloudSave?.extra || {}), source: 'ruffle-localStorage-v1' } });
+          lastSavedValue = value;
+          startupCloudSave = { ...(startupCloudSave || {}), ruffleSharedObject: value };
+          conflictDetected = false;
+          setStatus('Progreso sincronizado con la nube.');
+        } catch (error) {
+          console.warn('No se pudo sincronizar el progreso:', error);
+          setStatus('El juego sigue guardando localmente, pero falló la sincronización con la nube.');
+        }
+      }
+      function watchLocalSave() {
+        if (syncTimer) clearInterval(syncTimer);
+        syncTimer = setInterval(async () => {
+          const value = readLocalSharedObject();
+          if (value && value !== lastObservedValue) {
+            lastObservedValue = value;
+            // Fuerza el envío de un valor recién detectado; evita que el filtro
+            // de uploadCurrentSave lo descarte por coincidir con lastObservedValue.
+            await uploadCurrentSave(true);
+          }
+        }, 3000);
+      }
+      async function startGame() {
+        status.classList.remove('error');
+        if (!status.textContent.startsWith('Hay un guardado local')) status.textContent = 'Preparando guardado y cargando el juego…';
+        mount.replaceChildren();
+        try {
+          await prepareCloudSave();
+          if (!window.RufflePlayer) throw new Error('No se pudo cargar Ruffle. Comprueba tu conexión o el bloqueo de scripts externos.');
+          const ruffle = window.RufflePlayer.newest();
+          player = ruffle.createPlayer(); player.id = 'ruffle-player';
+          player.style.width = '100%'; player.style.height = '100%'; mount.appendChild(player);
+          await player.load({ url: './game.swf', autoplay: 'on', unmuteOverlay: 'visible', backgroundColor: '#000000', contextMenu: 'on', letterbox: 'on' });
+          setStatus(conflictDetected
+            ? 'Juego cargado. Se conserva el guardado local; hay una copia diferente en la nube y no se sobrescribió.'
+            : 'Juego cargado. Si iniciaste sesión, se comprobarán los cambios del guardado local cada 3 segundos.');
+          watchLocalSave();
+          if (userIsSignedIn && !startupCloudSave && readLocalSharedObject()) await uploadCurrentSave(true);
+          else if (userIsSignedIn && startupCloudSave && !startupCloudSave.ruffleSharedObject && readLocalSharedObject()) {
+            // Conserva otros campos guardados y agrega el SharedObject real.
+            await uploadCurrentSave(true);
+          }
+        } catch (error) {
+          console.error('Error al cargar Galactic Champions:', error);
+          showError('No se pudo iniciar el juego: ' + (error?.message || String(error)) + ' Comprueba que index.html, game.swf y supabase-config.js estén publicados en la raíz del repositorio.');
+        }
+      }
+      document.getElementById('save-progress').addEventListener('click', async () => {
+        const button = document.getElementById('save-progress');
+        button.disabled = true;
+        const originalLabel = button.textContent;
+        button.textContent = 'Guardando…';
+        try {
+          // Espera un instante para que Ruffle tenga oportunidad de escribir el SharedObject.
+          await new Promise(resolve => setTimeout(resolve, 800));
+          const value = readLocalSharedObject();
+          if (!value) {
+            setStatus('No se encontró un guardado local todavía. Juega un poco y vuelve a intentarlo.');
+            return;
+          }
+          if (!userIsSignedIn) {
+            setStatus('La partida está guardada localmente, pero debes iniciar sesión para subirla a Supabase.');
+            return;
+          }
+          if (conflictDetected) {
+            setStatus('Hay guardados distintos en local y en la nube. No se sobrescribió ninguno; resuelve el conflicto antes de guardar.');
+            return;
+          }
+          await saveProgress({
+            ruffleSharedObject: value,
+            extra: { source: 'ruffle-localStorage-manual-v1' }
+          });
+          lastObservedValue = value;
+          lastSavedValue = value;
+          setStatus('¡Progreso guardado en Supabase correctamente!');
+        } catch (error) {
+          console.error('Error al guardar manualmente:', error);
+          setStatus('No se pudo guardar en la nube: ' + (error?.message || String(error)));
+        } finally {
+          button.disabled = false;
+          button.textContent = originalLabel;
+        }
+      });
+
+      document.getElementById('reload').addEventListener('click', startGame);
+      document.getElementById('fullscreen').addEventListener('click', async () => {
+        const target = document.getElementById('frame');
+        try { if (document.fullscreenElement) await document.exitFullscreen(); else await target.requestFullscreen(); }
+        catch (error) { console.warn('Pantalla completa no disponible:', error); }
+      });
+      window.addEventListener('pagehide', () => { void uploadCurrentSave(true); });
+      window.addEventListener('beforeunload', () => { void uploadCurrentSave(true); });
+      window.addEventListener('load', startGame);
+    })();
+  </script>
+</body>
+</html>
