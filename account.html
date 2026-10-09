@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07111f">
+  <meta name="description" content="Crea tu cuenta de Galactic Champions y gestiona tu perfil.">
+  <title>Cuenta · Galactic Champions</title>
+  <style>
+    :root{color-scheme:dark;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#07111f;color:#edf6ff}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;padding:24px;display:grid;place-items:center;background:radial-gradient(ellipse at top,#15345a 0%,#07111f 65%)}
+    main{width:min(100%,520px)}.brand{margin-bottom:18px}.eyebrow{color:#75d6ff;text-transform:uppercase;letter-spacing:.16em;font-size:.75rem;font-weight:700}h1{margin:.25rem 0;font-size:clamp(1.6rem,5vw,2.2rem)}.muted{color:#9bb6d2;line-height:1.55}
+    .panel{background:#0c1b2c;border:1px solid #29435e;border-radius:16px;padding:clamp(18px,5vw,28px);box-shadow:0 18px 60px #0008}.tabs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:18px 0}.tabs button,.secondary{background:#122a45}.tabs button[aria-selected=true]{background:#20507a;border-color:#65bce8}label{display:block;margin:14px 0 6px;font-size:.92rem;color:#c8ddf1}input{width:100%;padding:12px;border-radius:8px;border:1px solid #426487;background:#07111f;color:#fff;font:inherit}input:focus{outline:2px solid #65bce8;outline-offset:1px}button,.button{border:1px solid #426487;border-radius:8px;background:#17618d;color:#fff;padding:11px 14px;font:inherit;cursor:pointer;text-decoration:none;display:inline-flex;justify-content:center;align-items:center}button:hover,.button:hover{filter:brightness(1.13)}button:disabled{opacity:.6;cursor:wait}.wide{width:100%;margin-top:18px}.secondary{background:#122a45}.notice{display:none;margin-top:16px;padding:12px;border-radius:8px;background:#142e45;color:#c8e8ff;overflow-wrap:anywhere}.notice.show{display:block}.notice.error{background:#401d2a;color:#ffd7de}.small{font-size:.82rem}.profile{display:none}.profile.show{display:block}.hidden{display:none!important}.profile-name{font-size:1.5rem;font-weight:750;overflow-wrap:anywhere}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}a{color:#83d8ff}footer{margin-top:16px;text-align:center;color:#708ba8;font-size:.8rem}
+    @media(max-width:420px){body{padding:12px}.panel{padding:16px}}
+  </style>
+  <script src="./supabase-config.js"></script>
+</head>
+<body>
+<main>
+  <div class="brand"><div class="eyebrow">Galactic Champions</div><h1>Cuenta de jugador</h1><div class="muted">Crea tu identidad de jugador. Tu nombre de usuario será único y no distinguirá entre mayúsculas y minúsculas.</div></div>
+  <section class="panel" id="auth-panel">
+    <div class="tabs" role="tablist" aria-label="Acceso"><button id="tab-register" type="button" aria-selected="true">Crear cuenta</button><button id="tab-login" type="button" aria-selected="false">Iniciar sesión</button></div>
+    <form id="auth-form">
+      <div id="username-wrap"><label for="username">Nombre de usuario</label><input id="username" name="username" minlength="3" maxlength="20" pattern="[A-Za-z0-9_]{3,20}" autocomplete="username" placeholder="Ej. Ben_10" required><div class="muted small">3–20 caracteres; letras sin acentos, números y guion bajo (_).</div></div>
+      <label for="email">Correo electrónico</label><input id="email" name="email" type="email" autocomplete="email" placeholder="tu@correo.com" required>
+      <label for="password">Contraseña</label><input id="password" name="password" type="password" minlength="8" autocomplete="new-password" placeholder="Mínimo 8 caracteres" required>
+      <button class="wide" id="submit-button" type="submit">Crear cuenta</button>
+    </form>
+    <button id="forgot-button" class="secondary wide hidden" type="button">Enviar enlace para restablecer contraseña</button>
+    <div id="notice" class="notice" role="status" aria-live="polite"></div>
+  </section>
+  <section class="panel profile" id="profile-panel">
+    <div class="eyebrow">Sesión activa</div><h2>¡Bienvenido/a!</h2><div class="muted">Has iniciado sesión como</div><div id="profile-name" class="profile-name"></div>
+    <p class="muted">La cuenta ya está conectada. El guardado de la partida y las estadísticas se añadirá en la siguiente etapa; esta primera versión no modifica los datos internos del juego SWF.</p>
+    <div class="actions"><a class="button" href="./index.html">Volver al juego</a><button id="logout-button" class="secondary" type="button">Cerrar sesión</button></div>
+    <div id="profile-notice" class="notice" role="status" aria-live="polite"></div>
+  </section>
+  <footer><a href="./index.html">← Volver a Galactic Champions</a><br>Usa esta página únicamente después de configurar tu proyecto Supabase.</footer>
+</main>
+<script type="module">
+  import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+
+  const config = window.GC_SUPABASE_CONFIG || {};
+  const configured = typeof config.url === 'string' && /^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(config.url)
+    && typeof config.publishableKey === 'string' && config.publishableKey.startsWith('sb_publishable_') ||
+    (typeof config.url === 'string' && /^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(config.url) && typeof config.publishableKey === 'string' && config.publishableKey.length > 30 && !config.publishableKey.includes('TU_CLAVE'));
+  const form = document.querySelector('#auth-form');
+  const usernameWrap = document.querySelector('#username-wrap');
+  const usernameInput = document.querySelector('#username');
+  const passwordInput = document.querySelector('#password');
+  const submitButton = document.querySelector('#submit-button');
+  const forgotButton = document.querySelector('#forgot-button');
+  const notice = document.querySelector('#notice');
+  const authPanel = document.querySelector('#auth-panel');
+  const profilePanel = document.querySelector('#profile-panel');
+  const profileNotice = document.querySelector('#profile-notice');
+  let mode = 'register';
+  let supabase = null;
+
+  function message(element, text, error = false) {
+    element.textContent = text;
+    element.classList.add('show');
+    element.classList.toggle('error', error);
+  }
+  function setMode(nextMode) {
+    mode = nextMode;
+    const registering = mode === 'register';
+    document.querySelector('#tab-register').setAttribute('aria-selected', String(registering));
+    document.querySelector('#tab-login').setAttribute('aria-selected', String(!registering));
+    usernameWrap.classList.toggle('hidden', !registering);
+    usernameInput.required = registering;
+    passwordInput.autocomplete = registering ? 'new-password' : 'current-password';
+    submitButton.textContent = registering ? 'Crear cuenta' : 'Iniciar sesión';
+    forgotButton.classList.toggle('hidden', registering);
+    notice.classList.remove('show', 'error');
+  }
+  async function showProfile(user) {
+    if (!user) {
+      authPanel.classList.remove('hidden');
+      profilePanel.classList.remove('show');
+      return;
+    }
+    const { data, error } = await supabase.from('profiles').select('username').eq('id', user.id).single();
+    authPanel.classList.add('hidden');
+    profilePanel.classList.add('show');
+    document.querySelector('#profile-name').textContent = data?.username || user.user_metadata?.username || 'Jugador';
+    if (error) message(profileNotice, 'La sesión funciona, pero no se pudo leer el perfil. Verifica que ejecutaste supabase/schema.sql.', true);
+  }
+
+  document.querySelector('#tab-register').addEventListener('click', () => setMode('register'));
+  document.querySelector('#tab-login').addEventListener('click', () => setMode('login'));
+
+  if (!configured) {
+    form.querySelectorAll('input,button').forEach(el => el.disabled = true);
+    message(notice, 'Falta configurar Supabase. Abre supabase-config.js, introduce la URL y la clave publicable de tu proyecto y sigue los pasos de README-SUPABASE.md.', true);
+  } else {
+    supabase = createClient(config.url, config.publishableKey);
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user) await showProfile(session.user);
+    supabase.auth.onAuthStateChange((_event, sessionNow) => {
+      if (sessionNow?.user) showProfile(sessionNow.user);
+      else { profilePanel.classList.remove('show'); authPanel.classList.remove('hidden'); }
+    });
+
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      notice.classList.remove('show', 'error');
+      submitButton.disabled = true;
+      const email = document.querySelector('#email').value.trim();
+      const password = passwordInput.value;
+      try {
+        if (mode === 'register') {
+          const username = usernameInput.value.trim();
+          if (!/^[A-Za-z0-9_]{3,20}$/.test(username)) throw new Error('El nombre debe tener 3–20 caracteres: letras, números o guion bajo.');
+          if (password.length < 8) throw new Error('La contraseña debe tener al menos 8 caracteres.');
+          const { data, error } = await supabase.auth.signUp({
+            email, password,
+            options: { data: { username }, emailRedirectTo: window.location.href.split('?')[0] }
+          });
+          if (error) throw error;
+          if (data.session) {
+            message(notice, 'Cuenta creada correctamente. ¡Bienvenido/a a Galactic Champions!');
+            await showProfile(data.user);
+          } else {
+            message(notice, 'Registro enviado. Revisa tu correo para confirmar la cuenta antes de iniciar sesión. Si el nombre ya está ocupado, prueba otro.');
+          }
+        } else {
+          const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+          if (error) throw error;
+          await showProfile(data.user);
+        }
+      } catch (error) {
+        const raw = String(error?.message || error);
+        const friendly = /profiles_username_lower_unique|duplicate key|already exists|unique constraint/i.test(raw)
+          ? 'Ese nombre de usuario ya está en uso. Elige otro.'
+          : /invalid login credentials/i.test(raw) ? 'Correo o contraseña incorrectos.'
+          : /email not confirmed/i.test(raw) ? 'Confirma tu correo electrónico antes de iniciar sesión.'
+          : /database error saving new user/i.test(raw) ? 'No se pudo crear la cuenta. Comprueba que ejecutaste supabase/schema.sql; si el nombre ya existe, prueba otro.' : raw;
+        message(notice, friendly, true);
+      } finally { submitButton.disabled = false; }
+    });
+
+    forgotButton.addEventListener('click', async () => {
+      const email = document.querySelector('#email').value.trim();
+      if (!email) { message(notice, 'Escribe tu correo electrónico primero.', true); return; }
+      forgotButton.disabled = true;
+      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.href.split('?')[0] });
+      message(notice, error ? error.message : 'Si existe una cuenta con ese correo, recibirás instrucciones para restablecer la contraseña.');
+      forgotButton.disabled = false;
+    });
+
+    document.querySelector('#logout-button').addEventListener('click', async () => {
+      const { error } = await supabase.auth.signOut();
+      if (error) message(profileNotice, error.message, true);
+      else { profilePanel.classList.remove('show'); authPanel.classList.remove('hidden'); setMode('login'); message(notice, 'Has cerrado sesión.'); }
+    });
+  }
+</script>
+</body>
+</html>
