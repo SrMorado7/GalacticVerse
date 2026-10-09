@@ -37,7 +37,12 @@ function normalizeProgress(progress = {}) {
     // Campo libre para datos adicionales que el juego pueda necesitar.
     extra: progress.extra && typeof progress.extra === 'object' && !Array.isArray(progress.extra)
       ? progress.extra
-      : {}
+      : {},
+    // Cadena serializada del SharedObject de Ruffle; no se interpreta ni modifica.
+    ruffleSharedObject: typeof progress.ruffleSharedObject === 'string'
+      && progress.ruffleSharedObject.length <= 90_000
+      ? progress.ruffleSharedObject
+      : null
   };
 
   // Evita enviar accidentalmente un guardado enorme desde el navegador.
