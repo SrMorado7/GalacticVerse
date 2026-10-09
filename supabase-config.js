@@ -5,6 +5,6 @@
  * NUNCA pongas aquí una secret key ni service_role.
  */
 window.GC_SUPABASE_CONFIG = {
-  url: 'https://TU-PROYECTO.supabase.co',
-  publishableKey: 'TU_CLAVE_PUBLICABLE_DE_SUPABASE'
+  url: 'https://nlnkpfghgaoytkfrpxoc.supabase.co',
+  publishableKey: 'sb_publishable_DMkzk_M1eQILjaa0tFxYyA_CpvpaW9d'
 };
