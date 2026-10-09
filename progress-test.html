@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Prueba de guardado — Galactic Champions</title>
+  <style>
+    body{font-family:system-ui,sans-serif;max-width:760px;margin:32px auto;padding:0 16px;background:#101827;color:#edf2ff}
+    main{background:#1b2940;padding:24px;border-radius:16px}
+    label{display:block;margin:14px 0 5px} input{padding:10px;width:100%;box-sizing:border-box;border-radius:8px;border:1px solid #65748b}
+    button{padding:10px 14px;margin:12px 8px 0 0;border:0;border-radius:8px;cursor:pointer}
+    pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0b1220;padding:12px;border-radius:8px}
+    .note{color:#c5d4ee}
+  </style>
+</head>
+<body>
+<main>
+  <h1>Prueba de guardado en la nube</h1>
+  <p class="note">Usa una cuenta de Galactic Champions que ya tenga sesión iniciada en esta página. Esta prueba guarda datos ficticios y no modifica la partida SWF.</p>
+  <label for="gold">Oro de prueba</label><input id="gold" type="number" min="0" value="250">
+  <label for="level">Nivel de prueba</label><input id="level" type="number" min="1" value="3">
+  <label for="aliens">Alienígenas desbloqueados (separados por coma)</label><input id="aliens" value="Pyronite, Conductoid">
+  <button id="save">Guardar prueba</button><button id="load">Cargar guardado</button>
+  <pre id="status">Preparado. Inicia sesión en account.html antes de probar.</pre>
+</main>
+<script src="./supabase-config.js"></script>
+<script type="module">
+  import { loadProgress, saveProgress, getProgressSupabaseClient } from './game-progress.js';
+  const status = document.querySelector('#status');
+  const say = value => status.textContent = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+
+  async function checkSession() {
+    const { data, error } = await getProgressSupabaseClient().auth.getSession();
+    if (error) throw error;
+    if (!data.session) {
+      say('No hay sesión en esta página. Inicia sesión en account.html y luego vuelve aquí; si no se comparte la sesión, inicia sesión desde esta página o usa account.html para verificar primero.');
+    } else {
+      say('Sesión detectada. Ya puedes guardar y cargar datos de prueba.');
+    }
+  }
+  checkSession().catch(e => say('Error: ' + e.message));
+
+  document.querySelector('#save').addEventListener('click', async () => {
+    try {
+      const progress = {
+        gold: Number(document.querySelector('#gold').value),
+        level: Number(document.querySelector('#level').value),
+        unlockedAliens: document.querySelector('#aliens').value.split(',').map(s => s.trim()).filter(Boolean),
+        stats: { testSaves: 1 },
+        extra: { source: 'progress-test.html' }
+      };
+      say(await saveProgress(progress));
+    } catch (e) { say('No se pudo guardar: ' + e.message); }
+  });
+
+  document.querySelector('#load').addEventListener('click', async () => {
+    try {
+      const progress = await loadProgress();
+      if (!progress) { say('Todavía no existe un guardado para esta cuenta. Pulsa “Guardar prueba” primero.'); return; }
+      document.querySelector('#gold').value = progress.gold ?? 0;
+      document.querySelector('#level').value = progress.level ?? 1;
+      document.querySelector('#aliens').value = (progress.unlockedAliens ?? []).join(', ');
+      say(progress);
+    } catch (e) { say('No se pudo cargar: ' + e.message); }
+  });
+</script>
+</body>
+</html>
