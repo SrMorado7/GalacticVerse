@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07111f">
+  <meta name="description" content="Ben 10: Galactic Champions — versión web ejecutada con Ruffle.">
+  <title>Ben 10: Galactic Champions</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, -apple-system, Segoe UI, sans-serif; background: #07111f; color: #edf6ff; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 20px; background: radial-gradient(ellipse at top, #15345a 0%, #07111f 65%); }
+    main { width: min(100%, 1100px); }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 0 14px; flex-wrap: wrap; }
+    h1 { font-size: clamp(1.1rem, 3vw, 1.7rem); margin: 0; letter-spacing: .04em; }
+    .tag { color: #9bb6d2; font-size: .9rem; margin-top: 5px; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    button { border: 1px solid #426487; border-radius: 8px; background: #122a45; color: #fff; padding: 10px 14px; font: inherit; cursor: pointer; }
+    button:hover { background: #1b3c60; }
+    #frame { width: 100%; aspect-ratio: 850 / 550; min-height: 250px; display: grid; place-items: center; overflow: hidden; background: #000; border: 1px solid #29435e; border-radius: 12px; box-shadow: 0 18px 60px #0008; }
+    #game { width: 100%; height: 100%; }
+    #status { padding: 12px 2px 0; color: #9bb6d2; font-size: .9rem; line-height: 1.5; }
+    #status.error { color: #ffb4b4; }
+    footer { color: #708ba8; font-size: .8rem; margin-top: 12px; }
+    @media (max-width: 560px) { body { padding: 10px; } #frame { min-height: 200px; border-radius: 6px; } button { padding: 8px 10px; } }
+  </style>
+  <script src="https://unpkg.com/@ruffle-rs/ruffle"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>BEN 10: GALACTIC CHAMPIONS</h1>
+        <div class="tag">Edición en español · Reproductor web Ruffle</div>
+      </div>
+      <div class="actions">
+        <button id="reload" type="button">Reiniciar juego</button>
+        <button id="fullscreen" type="button">Pantalla completa</button>
+      </div>
+    </header>
+    <section id="frame" aria-label="Juego">
+      <div id="game"></div>
+    </section>
+    <div id="status" role="status">Cargando el reproductor y el juego… La primera carga puede tardar unos segundos.</div>
+    <footer>Si el juego no carga, revisa la consola del navegador y la compatibilidad de Ruffle con este archivo Flash.</footer>
+  </main>
+  <script>
+    (() => {
+      const mount = document.getElementById('game');
+      const status = document.getElementById('status');
+      let player;
+
+      function showError(message) {
+        status.classList.add('error');
+        status.textContent = message;
+      }
+
+      async function startGame() {
+        status.classList.remove('error');
+        status.textContent = 'Cargando el juego…';
+        mount.replaceChildren();
+        try {
+          if (!window.RufflePlayer) {
+            throw new Error('No se pudo cargar Ruffle. Comprueba tu conexión o el bloqueo de scripts externos.');
+          }
+          const ruffle = window.RufflePlayer.newest();
+          player = ruffle.createPlayer();
+          player.id = 'ruffle-player';
+          player.style.width = '100%';
+          player.style.height = '100%';
+          mount.appendChild(player);
+          await player.load({
+            url: './game.swf',
+            autoplay: 'on',
+            unmuteOverlay: 'visible',
+            backgroundColor: '#000000',
+            contextMenu: 'on',
+            letterbox: 'on'
+          });
+          status.textContent = 'Juego cargado. Si no hay sonido, haz clic dentro del juego y revisa el control de audio.';
+        } catch (error) {
+          console.error('Error al cargar Galactic Champions:', error);
+          showError('No se pudo iniciar el juego: ' + (error && error.message ? error.message : String(error)) + ' Comprueba que index.html y game.swf estén en la raíz publicada del repositorio.');
+        }
+      }
+
+      document.getElementById('reload').addEventListener('click', startGame);
+      document.getElementById('fullscreen').addEventListener('click', async () => {
+        const target = document.getElementById('frame');
+        try {
+          if (document.fullscreenElement) await document.exitFullscreen();
+          else await target.requestFullscreen();
+        } catch (error) {
+          console.warn('Pantalla completa no disponible:', error);
+        }
+      });
+
+      window.addEventListener('load', startGame);
+    })();
+  </script>
+</body>
+</html>
