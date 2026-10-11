@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#081322">
-  <title>Galactic Champions · Prueba de salas PvP</title>
+  <title>Galactic Champions · PvP — Dados (Prueba 2)</title>
   <style>
     :root{font-family:system-ui,Segoe UI,Arial,sans-serif;color-scheme:dark;color:#ecf6ff;background:#081322}
     *{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(ellipse at top,#173e51,#081322 75%);padding:28px 14px}
@@ -20,6 +20,16 @@
     .player small{display:block;color:#9ab1c7;margin-top:4px}.status{margin-top:15px;padding:11px 13px;background:#172f43;border-radius:9px;color:#e0f1ff}
     .error{background:#512735;color:#ffe5e5}.ok{background:#1a4539;color:#d5ffe0}.hidden{display:none!important}
     a{color:#b1e5ff}label{display:block;margin-bottom:8px;color:#d3e9fb}.hint{font-size:.87rem}
+    #dice-panel{margin:20px 0;padding:16px;border:1px solid #416584;border-radius:12px;background:#0a1b2c}
+    .dice-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:14px 0}.dice-column{text-align:center;min-width:0}
+    .die{width:108px;height:108px;background:#fbfcfd;border:3px solid #b5bdca;border-radius:18px;box-shadow:inset 0 2px 5px #fff,0 7px 12px #0005;margin:10px auto;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);padding:14px;gap:3px}
+    .pip{width:16px;height:16px;border-radius:100%;background:#1c2733;place-self:center}
+    .die.rolling{animation:shake .19s ease-in-out infinite alternate}
+    @keyframes shake{from{transform:rotate(-11deg) translateY(-2px)}to{transform:rotate(11deg) translateY(2px)}}
+    .dice-column b{display:block;overflow-wrap:anywhere}.dice-label{font-weight:800;color:#a4ffb3}
+    #dice-winner{font-size:1.08rem;font-weight:750;text-align:center;color:#a4ffb3;margin:12px 0}
+    #dice-history{text-align:center;font-size:.87rem;color:#b3cee0}
+    @media(max-width:480px){.die{width:85px;height:85px;padding:10px}.pip{width:12px;height:12px}}
   </style>
   <script src="../supabase-config.js"></script>
 </head>
@@ -27,8 +37,8 @@
 <main>
   <a href="../index.html">← Volver al juego</a>
   <div class="eyebrow" style="margin-top:25px">Galactic Champions · Fase 2</div>
-  <h1>Salas PvP — prueba de conexión</h1>
-  <p>Primero comprobaremos que dos cuentas pueden encontrarse en una sala privada. Todavía no se ejecutan ataques ni se modifica ninguna partida.</p>
+  <h1>Salas PvP — sorteo de dados</h1>
+  <p>Prueba 2: cuando ambos jugadores entren, el anfitrión podrá iniciar un sorteo de dados blancos. Los dos navegadores recibirán el mismo resultado desde Supabase. Sin combate ni cambios en el progreso.</p>
   <section class="panel">
     <h2>Cuenta conectada</h2>
     <div id="account">Verificando sesión…</div>
@@ -48,7 +58,19 @@
     <div class="player"><b>Jugador 1 · Anfitrión</b><small id="host">Esperando…</small></div>
     <div class="player"><b>Jugador 2 · Invitado</b><small id="guest">Esperando al segundo jugador…</small></div>
     <div class="status" id="room-state" role="status">Esperando al otro jugador…</div>
-    <p class="hint">Esta versión comprueba la conexión consultando el estado cada 3 segundos. No incluye combate.</p>
+    <div id="dice-panel">
+      <h3 style="margin:0 0 10px">Sorteo de prioridad · Dados blancos</h3>
+      <button id="start-dice" type="button">Iniciar combate (probar dados)</button>
+      <p class="hint" id="dice-help">Se habilita cuando haya dos jugadores. Solo el anfitrión puede iniciar el sorteo.</p>
+      <div id="dice-result" class="hidden" aria-live="polite">
+        <div class="dice-grid">
+          <div class="dice-column"><b id="dice-host-name">Jugador 1</b><div id="die-host" class="die" aria-label="Dado del anfitrión"></div><span id="dice-host-value" class="dice-label">—</span></div>
+          <div class="dice-column"><b id="dice-guest-name">Jugador 2</b><div id="die-guest" class="die" aria-label="Dado del invitado"></div><span id="dice-guest-value" class="dice-label">—</span></div>
+        </div>
+        <div id="dice-history"></div><div id="dice-winner"></div>
+      </div>
+    </div>
+    <p class="hint">Ambos navegadores consultan Supabase cada 3 segundos. Esta prueba solo sortea el orden: todavía no incluye ataques.</p>
     <button class="danger" id="leave">Salir de la sala</button>
   </section>
   <div class="status" id="message" role="status" aria-live="polite">Preparando conexión…</div>
@@ -57,33 +79,105 @@
   import { getProgressSupabaseClient } from '../game-progress.js';
   const db=getProgressSupabaseClient();
   const $=id=>document.getElementById(id);
-  let user=null,roomId=null,roomCode=null,poll=null,busy=false;
+  let user=null,roomId=null,roomCode=null,poll=null,busy=false,roomData=null,lastRollKey=null,animationId=0,refreshing=false;
   const localKey='galactic-pvp-room-v1';
   function say(text,error=false){$('message').textContent=text;$('message').className='status'+(error?' error':'');}
   function screen(inRoom){$('lobby').classList.toggle('hidden',inRoom||!user);$('room').classList.toggle('hidden',!inRoom);}
-  function setBusy(value){busy=value;$('create').disabled=value;$('join').disabled=value;$('leave').disabled=value;}
+  function setBusy(value){busy=value;$('create').disabled=value;$('join').disabled=value;$('leave').disabled=value;updateDiceButton();}
   function displayName(u){return u?.user_metadata?.username||u?.user_metadata?.display_name||u?.email||'Cuenta conectada';}
   function persist(){if(roomId)sessionStorage.setItem(localKey,JSON.stringify({id:roomId,code:roomCode}));else sessionStorage.removeItem(localKey);}
   function stop(){if(poll){clearInterval(poll);poll=null;}}
   function errorText(error){return error?.message||String(error);}
+  const pipPositions={1:[4],2:[0,8],3:[0,4,8],4:[0,2,6,8],5:[0,2,4,6,8],6:[0,2,3,5,6,8]};
+  function drawDie(id,number){
+    const element=$(id);element.replaceChildren();
+    const spots=pipPositions[number]||[];
+    for(let i=0;i<9;i++){
+      const cell=document.createElement('div');
+      if(spots.includes(i))cell.className='pip';
+      cell.style.gridColumn=String(i%3+1);cell.style.gridRow=String(Math.floor(i/3)+1);
+      element.appendChild(cell);
+    }
+  }
+  function updateDiceButton(){
+    const full=!!(roomData&&roomData.guest_id);
+    const isHost=!!(roomData&&user&&roomData.host_id===user.id);
+    $('start-dice').disabled=busy||!full||!isHost||!!lastRollKey;
+    $('start-dice').classList.toggle('hidden',!isHost);
+    $('dice-help').textContent=lastRollKey?'Sorteo terminado. Los dos jugadores ven el mismo resultado.':
+      !full?'Esperando al segundo jugador para habilitar los dados.':
+      isHost?'Ambos jugadores listos: pulsa el botón para sortear.':'Esperando a que el anfitrión inicie los dados.';
+  }
+  const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+  async function animateRoll(roll,roomSnapshot,token){
+    $('dice-result').classList.remove('hidden');
+    $('dice-winner').textContent='';
+    $('dice-history').textContent='';
+    $('dice-host-name').textContent=roomSnapshot.host_name||'Jugador 1';
+    $('dice-guest-name').textContent=roomSnapshot.guest_name||'Jugador 2';
+    $('die-host').classList.add('rolling');$('die-guest').classList.add('rolling');
+    const turns=Array.isArray(roll.attempts)?roll.attempts:[];
+    for(let n=0;n<turns.length;n++){
+      for(let t=0;t<8;t++){
+        if(token!==animationId)return;
+        drawDie('die-host',1+Math.floor(Math.random()*6));
+        drawDie('die-guest',1+Math.floor(Math.random()*6));
+        $('dice-host-value').textContent='…';$('dice-guest-value').textContent='…';
+        await sleep(90);
+      }
+      if(token!==animationId)return;
+      const pair=turns[n];
+      drawDie('die-host',pair.host);drawDie('die-guest',pair.guest);
+      $('dice-host-value').textContent=String(pair.host);
+      $('dice-guest-value').textContent=String(pair.guest);
+      if(pair.host===pair.guest){
+        $('dice-history').textContent=`Empate ${pair.host} - ${pair.guest}. ¡Se repite el lanzamiento!`;
+        await sleep(850);
+      }
+    }
+    if(token!==animationId)return;
+    $('die-host').classList.remove('rolling');$('die-guest').classList.remove('rolling');
+    const winner=roll.winner_slot===1?roomSnapshot.host_name:roomSnapshot.guest_name;
+    $('dice-history').textContent=turns.length>1?`Desempates: ${turns.length-1}.`: 'Sorteo completado.';
+    $('dice-winner').textContent=`¡${winner||'Jugador '+roll.winner_slot} atacará primero!`;
+  }
+  async function checkDice(data){
+    const {data:roll,error}=await db.from('pvp_dice_rolls')
+      .select('room_id,host_roll,guest_roll,winner_slot,attempts,rolled_at')
+      .eq('room_id',data.id).maybeSingle();
+    if(data.id!==roomId)return;
+    if(error){say('No se pudo consultar el sorteo: '+errorText(error),true);return;}
+    if(!roll){updateDiceButton();return;}
+    const key=`${roll.room_id}:${roll.rolled_at}`;
+    if(key!==lastRollKey){lastRollKey=key;updateDiceButton();
+      const token=++animationId;animateRoll(roll,{...data},token);
+    }
+  }
   async function refresh(){
+    if(refreshing)return;
+    refreshing=true;
+    try{await refreshRoom();}finally{refreshing=false;}
+  }
+  async function refreshRoom(){
     if(!roomId)return;
     const id=roomId;
     const {data,error}=await db.from('pvp_rooms').select('id,code,host_id,guest_id,host_name,guest_name').eq('id',id).maybeSingle();
     if(id!==roomId)return;
     if(error){say('No se pudo consultar la sala: '+errorText(error),true);return;}
-    if(!data){stop();roomId=null;roomCode=null;persist();screen(false);say('La sala se cerró o ya no eres participante.');return;}
-    roomCode=data.code;$('room-code').textContent=data.code;
+    if(!data){stop();++animationId;lastRollKey=null;roomData=null;roomId=null;roomCode=null;persist();screen(false);say('La sala se cerró o ya no eres participante.');return;}
+    roomData=data;updateDiceButton();roomCode=data.code;$('room-code').textContent=data.code;
     $('host').textContent=data.host_name||'Jugador 1';$('guest').textContent=data.guest_name||'Esperando al segundo jugador…';
     $('room-state').textContent=data.guest_id?'¡Los dos jugadores están conectados! Prueba de sala completada.':'Esperando a que el segundo jugador se una…';
     $('room-state').className='status'+(data.guest_id?' ok':'');
+    await checkDice(data);
   }
-  async function enterRoom(payload){roomId=payload.id;roomCode=payload.code;persist();screen(true);await refresh();stop();poll=setInterval(refresh,3000);}
+  async function enterRoom(payload){stop();++animationId;lastRollKey=null;roomData=null;$('dice-result').classList.add('hidden');roomId=payload.id;roomCode=payload.code;persist();screen(true);await refresh();poll=setInterval(refresh,3000);}
   async function invoke(method,args){const {data,error}=await db.rpc(method,args);if(error)throw error;return data;}
   $('create').onclick=async()=>{if(busy)return;setBusy(true);try{const room=await invoke('pvp_create_room');await enterRoom(room);say('Sala creada. Comparte el código con otra cuenta.');}catch(e){say('No se pudo crear la sala: '+errorText(e),true);}finally{setBusy(false);}};
   $('join').onclick=async()=>{if(busy)return;const code=$('code').value.trim().toUpperCase();if(!/^[A-F0-9]{8}$/.test(code)){say('Introduce un código válido de 8 caracteres (0–9 y A–F).',true);return;}setBusy(true);try{const room=await invoke('pvp_join_room',{p_code:code});await enterRoom(room);say('Te uniste a la sala.');}catch(e){say('No se pudo entrar: '+errorText(e),true);}finally{setBusy(false);}};
+  $('start-dice').onclick=async()=>{if(busy||!roomId)return;setBusy(true);try{await invoke('pvp_start_dice',{p_room_id:roomId});say('¡Sorteo iniciado! Ambos jugadores verán el resultado.');await refresh();}catch(e){say('No se pudo iniciar el sorteo: '+errorText(e),true);}finally{setBusy(false);}};
   $('copy').onclick=async()=>{try{await navigator.clipboard.writeText(roomCode);say('Código copiado.');}catch(e){say('Copia el código que aparece en pantalla.');}};
-  $('leave').onclick=async()=>{if(busy||!roomId)return;setBusy(true);try{await invoke('pvp_leave_room',{p_room_id:roomId});stop();roomId=null;roomCode=null;persist();screen(false);say('Saliste de la sala.');}catch(e){say('No se pudo salir: '+errorText(e),true);}finally{setBusy(false);}};
+  $('leave').onclick=async()=>{if(busy||!roomId)return;setBusy(true);try{await invoke('pvp_leave_room',{p_room_id:roomId});stop();++animationId;lastRollKey=null;roomData=null;roomId=null;roomCode=null;persist();screen(false);say('Saliste de la sala.');}catch(e){say('No se pudo salir: '+errorText(e),true);}finally{setBusy(false);}};
   (async()=>{
     try{
       const {data,error}=await db.auth.getUser();if(error)throw error;
