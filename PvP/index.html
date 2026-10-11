@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#081322">
+  <title>Galactic Champions · Prueba de salas PvP</title>
+  <style>
+    :root{font-family:system-ui,Segoe UI,Arial,sans-serif;color-scheme:dark;color:#ecf6ff;background:#081322}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(ellipse at top,#173e51,#081322 75%);padding:28px 14px}
+    main{max-width:710px;margin:auto}h1{font-size:clamp(1.5rem,4vw,2.3rem);margin:.2rem 0}p{color:#adc0d4;line-height:1.55}
+    .eyebrow{color:#8eea9a;text-transform:uppercase;letter-spacing:.15em;font-size:.8rem;font-weight:800}
+    .panel{border:1px solid #35516a;border-radius:16px;background:#101f32;box-shadow:0 12px 35px #0004;padding:22px;margin:18px 0}
+    .row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}.row>*{flex:1}button,input{font:inherit;border-radius:9px;min-height:44px}
+    button{border:1px solid #5f9d78;background:#235a3e;color:#fff;font-weight:700;padding:10px 15px;cursor:pointer}button:hover:not(:disabled){filter:brightness(1.12)}
+    button.secondary{background:#203a55;border-color:#52708d}button.danger{background:#5b2b37;border-color:#94516a}
+    button:disabled{opacity:.5;cursor:not-allowed}input{padding:10px 12px;background:#071525;border:1px solid #52708d;color:#fff;min-width:0;text-transform:uppercase;letter-spacing:.13em}
+    .mono{font-family:ui-monospace,Consolas,monospace;letter-spacing:.14em;font-size:1.7rem;font-weight:900;color:#9effa5}
+    .player{padding:12px 14px;background:#081727;border-radius:10px;border:1px solid #26425b;margin:8px 0}
+    .player small{display:block;color:#9ab1c7;margin-top:4px}.status{margin-top:15px;padding:11px 13px;background:#172f43;border-radius:9px;color:#e0f1ff}
+    .error{background:#512735;color:#ffe5e5}.ok{background:#1a4539;color:#d5ffe0}.hidden{display:none!important}
+    a{color:#b1e5ff}label{display:block;margin-bottom:8px;color:#d3e9fb}.hint{font-size:.87rem}
+  </style>
+  <script src="../supabase-config.js"></script>
+</head>
+<body>
+<main>
+  <a href="../index.html">← Volver al juego</a>
+  <div class="eyebrow" style="margin-top:25px">Galactic Champions · Fase 2</div>
+  <h1>Salas PvP — prueba de conexión</h1>
+  <p>Primero comprobaremos que dos cuentas pueden encontrarse en una sala privada. Todavía no se ejecutan ataques ni se modifica ninguna partida.</p>
+  <section class="panel">
+    <h2>Cuenta conectada</h2>
+    <div id="account">Verificando sesión…</div>
+    <p class="hint">Debes iniciar sesión desde la página «Cuenta de jugador», en este mismo navegador y sitio web.</p>
+    <a href="../account.html">Ir a Cuenta de jugador</a>
+  </section>
+  <section class="panel hidden" id="lobby">
+    <h2>Crear o unirse a una sala</h2>
+    <button id="create">Crear sala privada</button>
+    <p>O introduce el código que te envíe otro jugador:</p>
+    <div class="row"><input id="code" maxlength="8" inputmode="text" autocomplete="off" spellcheck="false" placeholder="AB12CD34" aria-label="Código de sala"><button id="join">Unirse</button></div>
+  </section>
+  <section class="panel hidden" id="room">
+    <h2>Sala privada</h2>
+    <div class="hint">Código para compartir con el otro jugador</div>
+    <div class="row" style="margin:12px 0"><div class="mono" id="room-code">--------</div><button class="secondary" id="copy" style="flex:0 0 auto">Copiar código</button></div>
+    <div class="player"><b>Jugador 1 · Anfitrión</b><small id="host">Esperando…</small></div>
+    <div class="player"><b>Jugador 2 · Invitado</b><small id="guest">Esperando al segundo jugador…</small></div>
+    <div class="status" id="room-state" role="status">Esperando al otro jugador…</div>
+    <p class="hint">Esta versión comprueba la conexión consultando el estado cada 3 segundos. No incluye combate.</p>
+    <button class="danger" id="leave">Salir de la sala</button>
+  </section>
+  <div class="status" id="message" role="status" aria-live="polite">Preparando conexión…</div>
+</main>
+<script type="module">
+  import { getProgressSupabaseClient } from '../game-progress.js';
+  const db=getProgressSupabaseClient();
+  const $=id=>document.getElementById(id);
+  let user=null,roomId=null,roomCode=null,poll=null,busy=false;
+  const localKey='galactic-pvp-room-v1';
+  function say(text,error=false){$('message').textContent=text;$('message').className='status'+(error?' error':'');}
+  function screen(inRoom){$('lobby').classList.toggle('hidden',inRoom||!user);$('room').classList.toggle('hidden',!inRoom);}
+  function setBusy(value){busy=value;$('create').disabled=value;$('join').disabled=value;$('leave').disabled=value;}
+  function displayName(u){return u?.user_metadata?.username||u?.user_metadata?.display_name||u?.email||'Cuenta conectada';}
+  function persist(){if(roomId)sessionStorage.setItem(localKey,JSON.stringify({id:roomId,code:roomCode}));else sessionStorage.removeItem(localKey);}
+  function stop(){if(poll){clearInterval(poll);poll=null;}}
+  function errorText(error){return error?.message||String(error);}
+  async function refresh(){
+    if(!roomId)return;
+    const id=roomId;
+    const {data,error}=await db.from('pvp_rooms').select('id,code,host_id,guest_id,host_name,guest_name').eq('id',id).maybeSingle();
+    if(id!==roomId)return;
+    if(error){say('No se pudo consultar la sala: '+errorText(error),true);return;}
+    if(!data){stop();roomId=null;roomCode=null;persist();screen(false);say('La sala se cerró o ya no eres participante.');return;}
+    roomCode=data.code;$('room-code').textContent=data.code;
+    $('host').textContent=data.host_name||'Jugador 1';$('guest').textContent=data.guest_name||'Esperando al segundo jugador…';
+    $('room-state').textContent=data.guest_id?'¡Los dos jugadores están conectados! Prueba de sala completada.':'Esperando a que el segundo jugador se una…';
+    $('room-state').className='status'+(data.guest_id?' ok':'');
+  }
+  async function enterRoom(payload){roomId=payload.id;roomCode=payload.code;persist();screen(true);await refresh();stop();poll=setInterval(refresh,3000);}
+  async function invoke(method,args){const {data,error}=await db.rpc(method,args);if(error)throw error;return data;}
+  $('create').onclick=async()=>{if(busy)return;setBusy(true);try{const room=await invoke('pvp_create_room');await enterRoom(room);say('Sala creada. Comparte el código con otra cuenta.');}catch(e){say('No se pudo crear la sala: '+errorText(e),true);}finally{setBusy(false);}};
+  $('join').onclick=async()=>{if(busy)return;const code=$('code').value.trim().toUpperCase();if(!/^[A-F0-9]{8}$/.test(code)){say('Introduce un código válido de 8 caracteres (0–9 y A–F).',true);return;}setBusy(true);try{const room=await invoke('pvp_join_room',{p_code:code});await enterRoom(room);say('Te uniste a la sala.');}catch(e){say('No se pudo entrar: '+errorText(e),true);}finally{setBusy(false);}};
+  $('copy').onclick=async()=>{try{await navigator.clipboard.writeText(roomCode);say('Código copiado.');}catch(e){say('Copia el código que aparece en pantalla.');}};
+  $('leave').onclick=async()=>{if(busy||!roomId)return;setBusy(true);try{await invoke('pvp_leave_room',{p_room_id:roomId});stop();roomId=null;roomCode=null;persist();screen(false);say('Saliste de la sala.');}catch(e){say('No se pudo salir: '+errorText(e),true);}finally{setBusy(false);}};
+  (async()=>{
+    try{
+      const {data,error}=await db.auth.getUser();if(error)throw error;
+      user=data.user;
+      $('account').textContent=user?'Sesión activa: '+displayName(user):'No hay una sesión activa.';
+      if(!user){say('Inicia sesión con tu cuenta de jugador para usar las salas.');return;}
+      screen(false);say('Conexión preparada. Puedes crear una sala o unirte a otra.');
+      const stored=sessionStorage.getItem(localKey);
+      if(stored){try{const room=JSON.parse(stored);if(room.id&&room.code){await enterRoom(room);}}catch(e){sessionStorage.removeItem(localKey);}}
+    }catch(e){$('account').textContent='No se pudo verificar la sesión.';say('Error de Supabase: '+errorText(e),true);}
+  })();
+  window.addEventListener('pagehide',stop);
+</script>
+</body>
+</html>
